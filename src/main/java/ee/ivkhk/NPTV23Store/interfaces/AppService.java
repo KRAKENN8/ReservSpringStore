@@ -1,8 +1,13 @@
 package ee.ivkhk.NPTV23Store.interfaces;
 
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.repository.NoRepositoryBean;
+public interface AppService<T> {
+    void addEntity();
 
-@NoRepositoryBean
-public interface AppService<T, ID> extends JpaRepository<T, ID> {
+    void showEntities();
+
+    void editEntity();
+
+    default void showIncome() {
+        throw new UnsupportedOperationException("showIncome() не поддержан для данного типа!");
+    }
 }

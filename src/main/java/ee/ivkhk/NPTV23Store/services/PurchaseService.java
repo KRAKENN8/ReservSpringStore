@@ -1,72 +1,86 @@
 package ee.ivkhk.NPTV23Store.services;
 
+import ee.ivkhk.NPTV23Store.entity.Customer;
+import ee.ivkhk.NPTV23Store.entity.Product;
 import ee.ivkhk.NPTV23Store.entity.Purchase;
-import ee.ivkhk.NPTV23Store.helpers.PurchaseHelper;
 import ee.ivkhk.NPTV23Store.interfaces.PurchaseRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.LocalTime;
+import java.util.ArrayList;
 import java.util.List;
 
 @Service
 public class PurchaseService {
 
-    private final PurchaseRepository purchaseRepository;
-    private final CustomerService customerService;
-    private final ProductService productService;
+    @Autowired
+    private PurchaseRepository purchaseRepository;
 
     @Autowired
-    public PurchaseService(PurchaseRepository purchaseRepository, CustomerService customerService, ProductService productService) {
-        this.purchaseRepository = purchaseRepository;
-        this.customerService = customerService;
-        this.productService = productService;
-    }
+    private CustomerService customerService;
 
-    @Transactional
+    @Autowired
+    private ProductService productService;
+
     public void purchaseProduct(Long customerId, Long productId, int quantity) {
         if (quantity <= 0) {
             throw new IllegalArgumentException("Количество должно быть положительным.");
         }
 
-        CustomerService cs = customerService;
-        ProductService ps = productService;
+        Customer customer = customerService.findCustomerById(customerId)
+                .orElseThrow(() -> new IllegalArgumentException("Покупатель с ID " + customerId + " не найден."));
 
-        var customer = cs.getCustomerById(customerId);
-        var product = ps.getProductById(productId);
+        Product product = productService.findProductById(productId)
+                .orElseThrow(() -> new IllegalArgumentException("Товар с ID " + productId + " не найден."));
 
-        double totalPrice = product.getPrice() * quantity;
-        if (customer.getBalance() < totalPrice) {
-            throw new IllegalArgumentException("Недостаточно средств для покупки.");
+        double totalCost = product.getPrice() * quantity;
+        if (customer.getBalance() < totalCost) {
+            throw new IllegalArgumentException("Недостаточно средств на счёте покупателя.");
         }
+
         if (product.getQuantity() < quantity) {
             throw new IllegalArgumentException("Недостаточно товара на складе.");
         }
 
-        cs.decreaseCustomerBalance(customerId, totalPrice);
-        ps.decreaseProductQuantity(productId, quantity);
+        Purchase purchase = new Purchase();
+        purchase.setCustomer(customer);
+        purchase.setProduct(product);
+        purchase.setQuantity(quantity);
+        purchase.setPurchaseDate(LocalDateTime.now());
 
-        Purchase purchase = new Purchase(customer, product, quantity, LocalDateTime.now());
         purchaseRepository.save(purchase);
+
+        customer.setBalance(customer.getBalance() - totalCost);
+        customerService.editCustomer(customerId, null, null, customer.getBalance());
+
+        product.setQuantity(product.getQuantity() - quantity);
+        productService.editProduct(productId, null, 0, product.getQuantity());
     }
 
-    public String getAllPurchasesFormatted() {
-        StringBuilder formattedPurchases = new StringBuilder();
-        List<Purchase> purchases = purchaseRepository.findAll();
-        List<String> formattedList = PurchaseHelper.formatPurchases(purchases);
-        formattedList.forEach(s -> formattedPurchases.append(s).append("\n"));
-        return formattedPurchases.toString();
+    public Iterable<Purchase> getAllPurchases() {
+        return purchaseRepository.findAll();
     }
 
-    public double getIncome(LocalDate start, LocalDate end) {
-        LocalDateTime startDateTime = start.atStartOfDay();
-        LocalDateTime endDateTime = end.atTime(LocalTime.MAX);
-        List<Purchase> purchases = purchaseRepository.findByPurchaseDateBetween(startDateTime, endDateTime);
-        return purchases.stream()
-                .mapToDouble(purchase -> purchase.getProduct().getPrice() * purchase.getQuantity())
-                .sum();
+    public List<Purchase> getAllPurchasesAsList() {
+        Iterable<Purchase> iterable = purchaseRepository.findAll();
+        List<Purchase> list = new ArrayList<>();
+        iterable.forEach(list::add);
+        return list;
+    }
+
+    public double getIncome(java.time.LocalDate startDate, java.time.LocalDate endDate) {
+
+        LocalDateTime start = startDate.atStartOfDay();
+        LocalDateTime end   = endDate.plusDays(1).atStartOfDay();
+        double totalIncome = 0.0;
+
+        for (Purchase p : purchaseRepository.findAll()) {
+            if (!p.getPurchaseDate().isBefore(start) && p.getPurchaseDate().isBefore(end)) {
+                double itemCost = p.getProduct().getPrice() * p.getQuantity();
+                totalIncome += itemCost;
+            }
+        }
+        return totalIncome;
     }
 }
